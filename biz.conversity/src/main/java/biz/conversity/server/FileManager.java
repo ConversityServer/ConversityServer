@@ -13,14 +13,14 @@ public class FileManager {
 	
 	private FileManager() {}
 	
-	public static FileManager GetInstance() {
+	public static FileManager getInstance() {
 		if (instance == null) {
 			instance = new FileManager();
 		}
 		return instance;
 	}
 	
-	public void SaveDataXML(Object object, String filename){
+	public void saveDataXML(Object object, String filename){
         XMLEncoder encoder;
         try{
         	System.out.println("Try to Encode..");
@@ -35,7 +35,7 @@ public class FileManager {
         }
     }
 	
-	public Object LoadDataXML(String filename){
+	public Object loadDataXML(String filename){
         XMLDecoder decoder;
         try{
             decoder = new XMLDecoder(new FileInputStream(filename));
@@ -49,7 +49,7 @@ public class FileManager {
         }
     }
 	
-	public void SaveData(Object object, String filename) {
+	public void saveData(Object object, String filename) {
 		try {
 			FileOutputStream fos = new FileOutputStream(filename);
 			ObjectOutputStream oos = new ObjectOutputStream(fos);
@@ -64,7 +64,7 @@ public class FileManager {
 		}
 	}
 	
-	public Object LoadData(String filename) {
+	public Object loadData(String filename) {
 		Object object = null;
 		try {
 			FileInputStream fis = new FileInputStream(filename);
@@ -76,6 +76,7 @@ public class FileManager {
 		catch (Exception e)
 		{
 			e.printStackTrace();
+			return object;
 		}
 		return object;
 	}

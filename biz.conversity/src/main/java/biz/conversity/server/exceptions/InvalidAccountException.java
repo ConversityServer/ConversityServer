@@ -1,4 +1,4 @@
-package biz.conversity.server;
+package biz.conversity.server.exceptions;
 
 public class InvalidAccountException extends RuntimeException{
 	static final long serialVersionUID = 1;

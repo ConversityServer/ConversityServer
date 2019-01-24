@@ -1,6 +1,5 @@
 package biz.conversity.server;
 
-import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -10,110 +9,156 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
+
+import biz.conversity.server.exceptions.AccountAlreadyExistsException;
+import biz.conversity.server.exceptions.AccountNotFoundException;
+import biz.conversity.server.exceptions.BadCredentialsException;
+import biz.conversity.server.exceptions.UnauthorizedRequestException;
 
 @RestController
 public class AccountService {
-	private static AccountManager accountManager = AccountManager.getInstance();
-	private final Map<String, Account> sessions = new HashMap<String, Account>();
+	private static FileManager fileManager = FileManager.getInstance();
+	private static Map<String, String> verMap;
+	private static Map<String, Account> accounts;
 	
+	/**
+	 * Constructor
+	 */
+	public AccountService() {
+		verMap = (HashMap<String, String>)fileManager.loadData("verMap.ser");
+		if (verMap == null) {
+			verMap = new HashMap<String, String>();
+			fileManager.saveData(verMap, "verMap.ser");
+		}
+		
+		accounts = (HashMap<String, Account>)fileManager.loadData("accounts.ser");
+		if (accounts == null) {
+			accounts = new HashMap<String, Account>();
+			fileManager.saveData(accounts, "accounts.ser");
+		}
+	}
+	
+	/**
+	 * Method to check for connection to server
+	 * @return true
+	 */
 	@RequestMapping(value = "/connection", method = RequestMethod.GET)
 	public ResponseEntity<Object> verifyConnection()
 	{
 		return new ResponseEntity<>(true, HttpStatus.OK);
 	}
 	
-	@RequestMapping(value = "/account", method = RequestMethod.POST)
+	/**
+	 * Requests the entire list of users.  Requires Admin account.
+	 * @param userName
+	 * @param password
+	 * @return
+	 */
+	@RequestMapping(value = "/accounts", method = RequestMethod.GET)
+	public ResponseEntity<Object> getAllAccounts(
+			@RequestParam String userName, 
+			@RequestParam String password
+			) {
+		if (verMap.get(userName) != password) throw new BadCredentialsException();
+		Account requester = accounts.get(userName);
+		if (requester.getAccountType() != AccountType.ADMIN) throw new UnauthorizedRequestException();
+		return new ResponseEntity<>(accounts.values(), HttpStatus.OK);
+	}
+
+	/**
+	 * Requests a specified user account
+	 * @param accountName
+	 * @param userName
+	 * @param password
+	 * @return
+	 */
+	@RequestMapping(value = "/accounts/{id}", method = RequestMethod.GET)
+	public ResponseEntity<Object> getAccount(
+			@PathVariable("id") String accountName,
+			@RequestParam String userName, 
+			@RequestParam String password
+			) {
+		if (verMap.get(userName) != password) throw new BadCredentialsException();
+		Account account = accounts.get(accountName);
+		if (account == null) throw new AccountNotFoundException();
+		return new ResponseEntity<>(account, HttpStatus.OK);
+	}
+	
+	/**
+	 * Creates a new Account
+	 * @param userName
+	 * @param password
+	 * @return
+	 */
+	@RequestMapping(value = "/accounts", method = RequestMethod.POST)
 	public ResponseEntity<Object> createAccount(
 			@RequestParam String userName, 
 			@RequestParam String password
 			) {
-		// User names are based on an email address, but at this point, the userName is
+		// User names and email address are the same at this point, but the userName is
 		// encrypted (once implemented).  Dont forget to decrypt the user name before
 		// making an email address out of it.
-		String email = userName.toLowerCase() + "@uah.edu";
-		if (accountManager.createAccount(userName, email, password)) {
-			return new ResponseEntity<>("Account created successfully", HttpStatus.CREATED);
+		if (accounts.get(userName) != null) throw new AccountAlreadyExistsException();	// This account already exists
+		
+		String email = userName.toLowerCase();
+		verMap.put(userName, password);
+		
+		AccountType accountType = AccountType.USER;
+		if (accounts.isEmpty()) {
+			accountType = AccountType.ADMIN;
 		}
-		return new ResponseEntity<>("Account already exists", HttpStatus.NOT_FOUND);
+		Account newAccount = new Account(userName, email, accountType);
+		accounts.put(userName, newAccount);
+		
+		fileManager.saveData(verMap, "verMap.ser");
+		fileManager.saveData(accounts,  "accounts.ser");
+			
+		return new ResponseEntity<>("Account created successfully", HttpStatus.CREATED);
 	}
 	
-	@RequestMapping(value = "/account/{id}", method = RequestMethod.DELETE)
+	/**
+	 * Deletes an account.  The requester must be the same as the account, or an Admin
+	 * @param accountName
+	 * @param userName
+	 * @param password
+	 * @return
+	 */
+	@RequestMapping(value = "/accounts/{id}", method = RequestMethod.DELETE)
 	public ResponseEntity<Object> RemoveAccount(
-			@PathVariable("id") String sessionId,
-			@RequestParam String userName, 
+			@PathVariable("id") String accountName,
+			@RequestParam String userName,
 			@RequestParam String password
 			) {
-		if (accountManager.removeAccount(userName, password)) {
-			return new ResponseEntity<>("The Account has been deleted", HttpStatus.OK);
-		}
-		return new ResponseEntity<>("That Account could not be found", HttpStatus.NOT_FOUND);
+		if (verMap.get(userName) != password) throw new BadCredentialsException();
+		Account requester = accounts.get(userName);
+		if (
+				requester != accounts.get(accountName) || 
+				requester.getAccountType() != AccountType.ADMIN
+				) throw new UnauthorizedRequestException();
+		
+		verMap.remove(accountName);
+		accounts.remove(accountName);
+		fileManager.saveData(accounts, "accounts.ser");
+		return new ResponseEntity<>("The Account has been deleted", HttpStatus.OK);
 	}
 	
-	@RequestMapping(value = "/password/{id}", method = RequestMethod.PUT)
+	/**
+	 * Changes the password on an account.  Only the owner of the account can do this.
+	 * @param sessionId
+	 * @param oldPassword
+	 * @param newPassword
+	 * @return
+	 */
+	@RequestMapping(value = "/accounts/{id}/password", method = RequestMethod.PUT)
 	public ResponseEntity<Object> UpdatePassword(
-			@PathVariable("id") String sessionId, 
+			@PathVariable("id") String accountName, 
 			@RequestParam String oldPassword, 
 			@RequestParam String newPassword
 			) {
-		Account account = sessions.get(sessionId);
-		if (account != null && account.getPassword() == oldPassword) {
-			account.setPassword(newPassword);
-			return new ResponseEntity<>("Password updated", HttpStatus.OK);
-		}
-		return new ResponseEntity<>("The account is invalid or password incorrect", HttpStatus.NOT_FOUND);
-	}
-	
-	@RequestMapping(value = "/session", method = RequestMethod.GET)
-	public ResponseEntity<Object> LogIn(
-			@RequestParam(value="userName") String userName, 
-			@RequestParam(value="password") String password
-			) {
-		Account account = accountManager.validateAccount(userName, password);
-		if ( account != null) {
-			String sessionId = "" + new Date().getTime();
-			sessions.put(sessionId, account);
-			System.out.println(account.toString() + " has logged in.");
-			return new ResponseEntity<>(sessionId, HttpStatus.OK);
-		}
-		return new ResponseEntity<>("Could not verify account", HttpStatus.NOT_FOUND);
-	}
-	
-	@RequestMapping(value = "/session/{id}", method = RequestMethod.DELETE)
-	public ResponseEntity<Object> LogOut(
-			@PathVariable("id") String sessionId
-			) {
-		if (sessions.containsKey(sessionId)) {
-			System.out.println( sessions.get(sessionId).toString() + " has logged out.");
-			sessions.remove(sessionId);
-			return new ResponseEntity<>("Logged out", HttpStatus.OK);
-		}
-		return new ResponseEntity<>("Flagrant System Error", HttpStatus.NOT_FOUND);
-	}
-	
-	@RequestMapping(value = "/profile", method = RequestMethod.GET)
-	@ResponseBody
-	public ResponseEntity<Object> GetProfile(
-			@RequestParam String userName
-			) {
-		Profile profile = accountManager.getProfile(userName);
-		if (profile != null) {
-			return new ResponseEntity<>(profile, HttpStatus.OK);
-		}
-		return new ResponseEntity<>("That profile could not be found", HttpStatus.NOT_FOUND);
-	}
-	
-	@RequestMapping(value = "/profile/{id}", method = RequestMethod.PUT)
-	public ResponseEntity<Object> PutProfile(
-			@PathVariable("id") String sessionId, 
-			@RequestParam Profile profile
-			) {
-		Account account = sessions.get(sessionId);
-		if (account != null) {
-			account.setProfile(profile);
-			return new ResponseEntity<>("Profile updated successfully", HttpStatus.OK);
-		}
-		return new ResponseEntity<>("Account could not be found", HttpStatus.NOT_FOUND);
+		if (verMap.get(accountName) != oldPassword) throw new BadCredentialsException();
+		
+		verMap.put(accountName, newPassword);
+		return new ResponseEntity<>("Password updated", HttpStatus.OK);
 	}
 }
