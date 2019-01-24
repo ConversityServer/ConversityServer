@@ -36,7 +36,7 @@ public class AccountService {
 		if (accountManager.createAccount(userName, email, password)) {
 			return new ResponseEntity<>("Account created successfully", HttpStatus.CREATED);
 		}
-		return new ResponseEntity<>("Account already exists", HttpStatus.CONFLICT);
+		return new ResponseEntity<>("Account already exists", HttpStatus.NOT_FOUND);
 	}
 	
 	@RequestMapping(value = "/account/{id}", method = RequestMethod.DELETE)
@@ -48,25 +48,25 @@ public class AccountService {
 		if (accountManager.removeAccount(userName, password)) {
 			return new ResponseEntity<>("The Account has been deleted", HttpStatus.OK);
 		}
-		return new ResponseEntity<>("That Account could not be found", HttpStatus.CONFLICT);
+		return new ResponseEntity<>("That Account could not be found", HttpStatus.NOT_FOUND);
 	}
 	
-	@RequestMapping(value = "/account/{id}", method = RequestMethod.PUT)
-	public boolean UpdateAccount(
-			@RequestParam String sessionId, 
+	@RequestMapping(value = "/password/{id}", method = RequestMethod.PUT)
+	public ResponseEntity<Object> UpdatePassword(
+			@PathVariable("id") String sessionId, 
 			@RequestParam String oldPassword, 
 			@RequestParam String newPassword
 			) {
 		Account account = sessions.get(sessionId);
 		if (account != null && account.getPassword() == oldPassword) {
 			account.setPassword(newPassword);
-			return true;
+			return new ResponseEntity<>("Password updated", HttpStatus.OK);
 		}
-		return false;
+		return new ResponseEntity<>("The account is invalid or password incorrect", HttpStatus.NOT_FOUND);
 	}
 	
 	@RequestMapping(value = "/session", method = RequestMethod.GET)
-	public String LogIn(
+	public ResponseEntity<Object> LogIn(
 			@RequestParam(value="userName") String userName, 
 			@RequestParam(value="password") String password
 			) {
@@ -75,39 +75,45 @@ public class AccountService {
 			String sessionId = "" + new Date().getTime();
 			sessions.put(sessionId, account);
 			System.out.println(account.toString() + " has logged in.");
-			return sessionId;
+			return new ResponseEntity<>(sessionId, HttpStatus.OK);
 		}
-		return null;
+		return new ResponseEntity<>("Could not verify account", HttpStatus.NOT_FOUND);
 	}
 	
-	@RequestMapping(value = "/session", method = RequestMethod.DELETE)
-	public boolean LogOut(
-			@RequestParam String sessionId
+	@RequestMapping(value = "/session/{id}", method = RequestMethod.DELETE)
+	public ResponseEntity<Object> LogOut(
+			@PathVariable("id") String sessionId
 			) {
 		if (sessions.containsKey(sessionId)) {
 			System.out.println( sessions.get(sessionId).toString() + " has logged out.");
 			sessions.remove(sessionId);
-			return true;
+			return new ResponseEntity<>("Logged out", HttpStatus.OK);
 		}
-		return false;
+		return new ResponseEntity<>("Flagrant System Error", HttpStatus.NOT_FOUND);
 	}
 	
 	@RequestMapping(value = "/profile", method = RequestMethod.GET)
 	@ResponseBody
-	public Profile GetProfile(
+	public ResponseEntity<Object> GetProfile(
 			@RequestParam String userName
 			) {
-		return accountManager.getProfile(userName);
+		Profile profile = accountManager.getProfile(userName);
+		if (profile != null) {
+			return new ResponseEntity<>(profile, HttpStatus.OK);
+		}
+		return new ResponseEntity<>("That profile could not be found", HttpStatus.NOT_FOUND);
 	}
 	
-	@RequestMapping(value = "/profile", method = RequestMethod.PUT)
-	public void PutProfile(
-			@RequestParam String sessionId, 
+	@RequestMapping(value = "/profile/{id}", method = RequestMethod.PUT)
+	public ResponseEntity<Object> PutProfile(
+			@PathVariable("id") String sessionId, 
 			@RequestParam Profile profile
 			) {
 		Account account = sessions.get(sessionId);
 		if (account != null) {
 			account.setProfile(profile);
+			return new ResponseEntity<>("Profile updated successfully", HttpStatus.OK);
 		}
+		return new ResponseEntity<>("Account could not be found", HttpStatus.NOT_FOUND);
 	}
 }
