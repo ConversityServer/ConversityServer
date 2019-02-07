@@ -6,6 +6,7 @@ import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -44,9 +45,15 @@ public class AccountService {
 	 * @return true
 	 */
 	@RequestMapping(value = "/connection", method = RequestMethod.GET)
-	public ResponseEntity<Object> verifyConnection()
-	{
-		return new ResponseEntity<>(true, HttpStatus.OK);
+	public ResponseEntity<Object> verifyConnection(
+			@RequestParam String userName, 
+			@RequestParam String password
+			) {
+		System.out.println( userName + " attempting log in");
+		if (verMap.get(userName) == null || !verMap.get(userName).equals(password)) throw new BadCredentialsException();
+		Account account = accounts.get(userName);
+		System.out.println( userName + " logged in");
+		return new ResponseEntity<>(account, HttpStatus.OK);
 	}
 	
 	/**
@@ -60,7 +67,7 @@ public class AccountService {
 			@RequestParam String userName, 
 			@RequestParam String password
 			) {
-		if (verMap.get(userName) != password) throw new BadCredentialsException();
+		if (verMap.get(userName) == null || !verMap.get(userName).equals(password)) throw new BadCredentialsException();
 		Account requester = accounts.get(userName);
 		if (requester.getAccountType() != AccountType.ADMIN) throw new UnauthorizedRequestException();
 		return new ResponseEntity<>(accounts.values(), HttpStatus.OK);
@@ -75,11 +82,11 @@ public class AccountService {
 	 */
 	@RequestMapping(value = "/accounts/{id}", method = RequestMethod.GET)
 	public ResponseEntity<Object> getAccount(
-			@PathVariable("id") String accountName,
 			@RequestParam String userName, 
-			@RequestParam String password
+			@RequestParam String password,
+			@PathVariable("id") String accountName
 			) {
-		if (verMap.get(userName) != password) throw new BadCredentialsException();
+		if (verMap.get(userName) == null || !verMap.get(userName).equals(password)) throw new BadCredentialsException();
 		Account account = accounts.get(accountName);
 		if (account == null) throw new AccountNotFoundException();
 		return new ResponseEntity<>(account, HttpStatus.OK);
@@ -94,26 +101,24 @@ public class AccountService {
 	@RequestMapping(value = "/accounts", method = RequestMethod.POST)
 	public ResponseEntity<Object> createAccount(
 			@RequestParam String userName, 
-			@RequestParam String password
+			@RequestParam String password,
+			@RequestBody Account newAccount
 			) {
-		// User names and email address are the same at this point, but the userName is
-		// encrypted (once implemented).  Dont forget to decrypt the user name before
-		// making an email address out of it.
+		System.out.println("Account creation started by: "+userName);
 		if (accounts.get(userName) != null) throw new AccountAlreadyExistsException();	// This account already exists
 		
-		String email = userName.toLowerCase();
 		verMap.put(userName, password);
 		
 		AccountType accountType = AccountType.USER;
 		if (accounts.isEmpty()) {
 			accountType = AccountType.ADMIN;
 		}
-		Account newAccount = new Account(userName, email, accountType);
+		newAccount.setAccountType(accountType);
 		accounts.put(userName, newAccount);
 		
 		fileManager.saveData(verMap, "verMap.ser");
 		fileManager.saveData(accounts,  "accounts.ser");
-			
+		System.out.println(newAccount.getEmail() + " account created");
 		return new ResponseEntity<>("Account created successfully", HttpStatus.CREATED);
 	}
 	
@@ -126,11 +131,11 @@ public class AccountService {
 	 */
 	@RequestMapping(value = "/accounts/{id}", method = RequestMethod.DELETE)
 	public ResponseEntity<Object> RemoveAccount(
-			@PathVariable("id") String accountName,
 			@RequestParam String userName,
-			@RequestParam String password
+			@RequestParam String password,
+			@PathVariable("id") String accountName
 			) {
-		if (verMap.get(userName) != password) throw new BadCredentialsException();
+		if (verMap.get(userName) == null || !verMap.get(userName).equals(password)) throw new BadCredentialsException();
 		Account requester = accounts.get(userName);
 		if (
 				requester != accounts.get(accountName) || 
@@ -143,6 +148,17 @@ public class AccountService {
 		return new ResponseEntity<>("The Account has been deleted", HttpStatus.OK);
 	}
 	
+	@RequestMapping(value = "/accounts/{id}", method = RequestMethod.PUT)
+	public ResponseEntity<Object> updateAccount(
+			@PathVariable("id") String userName,
+			@RequestParam String password,
+			@RequestBody Account account
+			){
+		if (verMap.get(userName) == null || !verMap.get(userName).equals(password)) throw new BadCredentialsException();
+		accounts.put(userName, account);
+		fileManager.saveData(accounts, "accounts.ser");
+		return new ResponseEntity<>("Account updated", HttpStatus.OK);
+	}
 	/**
 	 * Changes the password on an account.  Only the owner of the account can do this.
 	 * @param sessionId
@@ -151,14 +167,95 @@ public class AccountService {
 	 * @return
 	 */
 	@RequestMapping(value = "/accounts/{id}/password", method = RequestMethod.PUT)
-	public ResponseEntity<Object> UpdatePassword(
+	public ResponseEntity<Object> updatePassword(
 			@PathVariable("id") String accountName, 
 			@RequestParam String oldPassword, 
 			@RequestParam String newPassword
 			) {
-		if (verMap.get(accountName) != oldPassword) throw new BadCredentialsException();
+		if (verMap.get(accountName) == null || !verMap.get(accountName).equals(oldPassword)) throw new BadCredentialsException();
 		
 		verMap.put(accountName, newPassword);
 		return new ResponseEntity<>("Password updated", HttpStatus.OK);
+	}
+	
+	@RequestMapping(value = "/accounts/{account}/photos/{photoName}", method = RequestMethod.PUT)
+	public ResponseEntity<Object> addPhoto(
+			@PathVariable("account") String accountName,
+			@RequestParam String password,
+			@PathVariable("photoName") String photoName,
+			@RequestBody String photoString
+			) {
+		if (verMap.get(accountName) == null || !verMap.get(accountName).equals(password)) throw new BadCredentialsException();
+		Account account = accounts.get(accountName);
+		// Check if a photo with the same name already exists
+		if (account.getPhotos().containsKey(photoName)) {
+			// If so delete it.  Assume user is updating photo
+			account.getPhotos().remove(photoName);
+		}
+		// Add new photoString to HashMap
+		account.getPhotos().put(photoName, photoString);
+		
+		return new ResponseEntity<>("Photo added", HttpStatus.OK);
+	}
+	
+	@RequestMapping(value = "/accounts/{targetAccount}/photos/{photoName}", method = RequestMethod.GET)
+	public ResponseEntity<Object> getPhoto(
+			@PathVariable("targetAccount") String targetAccount,
+			@PathVariable("photoName") String photoName,
+			@RequestParam String accountName,
+			@RequestParam String password
+			) {
+		if (verMap.get(accountName) == null || !verMap.get(accountName).equals(password)) throw new BadCredentialsException();
+		Account account = accounts.get(targetAccount);
+		// Technically, HashMap.get() would return null anyway if the key doesn't exist, but
+		// do it this way in case an exception needs to be thrown later
+		String photoString = null;
+		if (account.getPhotos().containsKey(photoName)) {
+			photoString = account.getPhotos().get(photoName);
+		}
+		return new ResponseEntity<>(photoString, HttpStatus.OK);
+	}
+	
+	@RequestMapping(value = "/accounts/{account}/photos/{photoName}", method = RequestMethod.DELETE)
+	public ResponseEntity<Object> deletePhoto(
+			@PathVariable("account") String accountName,
+			@RequestParam String password,
+			@PathVariable("photoName") String photoName
+			) {
+		if (verMap.get(accountName) == null || !verMap.get(accountName).equals(password)) throw new BadCredentialsException();
+		Account account = accounts.get(accountName);
+		// Check if a photo with the name exists
+		if (account.getPhotos().containsKey(photoName)) {
+			// If so delete it.
+			account.getPhotos().remove(photoName);
+		}
+		
+		return new ResponseEntity<>("Photo Deleted", HttpStatus.OK);
+	}
+	
+	@RequestMapping(value = "/accounts/{account}/profilePic", method = RequestMethod.PUT)
+	public ResponseEntity<Object> changeProfilePic(
+			@PathVariable("account") String accountName,
+			@RequestParam String password,
+			@RequestBody String photoString
+			) {
+		if (verMap.get(accountName) == null || !verMap.get(accountName).equals(password)) throw new BadCredentialsException();
+		Account account = accounts.get(accountName);
+		
+		account.setPicture(photoString);
+		
+		return new ResponseEntity<>("Profile Picture updated", HttpStatus.OK);
+	}
+	
+	@RequestMapping(value = "/accounts/{targetAccount}/profilePic", method = RequestMethod.GET)
+	public ResponseEntity<Object> getProfilePic(
+			@PathVariable("targetAccount") String targetAccount,
+			@RequestParam String accountName,
+			@RequestParam String password
+			) {
+		if (verMap.get(accountName) == null || !verMap.get(accountName).equals(password)) throw new BadCredentialsException();
+		Account account = accounts.get(targetAccount);
+		String profilePicString = account.getPicture();
+		return new ResponseEntity<>(profilePicString, HttpStatus.OK);
 	}
 }
